@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Class Movie Picks</title>
+<style>
+:root{--bg:#e9edf5;--ticket:#fff;--text:#1b1f3b;--muted:#5d6385;--accent:#3b4cca;--gold:#ffc53d;--line:#c5ccdf}
+@media(prefers-color-scheme:dark){:root{--bg:#12142a;--ticket:#1d2040;--text:#eef0ff;--muted:#a3a9cf;--accent:#8e9bff;--line:#3a3f6b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 system-ui,sans-serif}
+main{max-width:720px;margin:0 auto;padding:20px 14px 60px}
+h1{font:700 2rem/1.1 Georgia,serif;margin:10px 0 6px}
+h2{font:700 1.3rem Georgia,serif;margin:32px 0 12px}
+.muted{color:var(--muted)}.small{font-size:.85rem}
+.panel{background:var(--ticket);border:1px solid var(--line);border-radius:10px;padding:14px}
+label{display:block;font-weight:600;margin:0 0 4px}
+input{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;font:inherit;background:var(--bg);color:var(--text);margin-bottom:12px}
+input:focus,button:focus-visible{outline:3px solid var(--accent);outline-offset:1px}
+button{font:inherit;font-weight:600;cursor:pointer;border:0;border-radius:8px;padding:10px 16px;background:var(--accent);color:var(--ticket)}
+button:disabled{opacity:.45;cursor:default}
+img,.ph{border-radius:4px;object-fit:cover;background:var(--line);flex:none}
+.res{display:flex;gap:10px;align-items:center;padding:6px;border-radius:8px;cursor:pointer}
+.res:hover{background:var(--bg)}
+.res img,.res .ph{width:36px;height:54px}
+.film{display:flex;position:relative;overflow:hidden;background:var(--ticket);border:1px solid var(--line);border-radius:10px;margin-bottom:12px}
+.film>img,.film>.ph{width:72px;min-height:108px;border-radius:0}
+.info{flex:1;padding:10px 12px;min-width:0}
+.ov{margin:6px 0 0;font-size:.88rem;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.stub{position:relative;width:76px;border-left:2px dashed var(--line);display:flex;align-items:center;justify-content:center;flex:none}
+.stub::before,.stub::after{content:"";position:absolute;left:-9px;width:16px;height:16px;border-radius:50%;background:var(--bg);border:1px solid var(--line)}
+.stub::before{top:-9px}.stub::after{bottom:-9px}
+.like{background:none;color:var(--text);border:1px solid var(--line);padding:8px 10px;font-size:1rem}
+.like.on{background:var(--gold);color:#1b1f3b;border-color:var(--gold)}
+#status,#msg{min-height:1.4em}
+</style>
+</head>
+<body>
+<main>
+<h1>Class Movie Picks</h1>
+<p class="muted">Films our class loves. Add yours and like your favorites.</p>
+<p id="status" class="small"></p>
+
+<h2>Most liked</h2>
+<div id="top"></div>
+
+<h2>Recommend a film</h2>
+<div class="panel">
+<label for="name">Your name</label>
+<input id="name" maxlength="40" autocomplete="given-name">
+<label for="q">Film title</label>
+<input id="q" placeholder="Start typing a title…" autocomplete="off">
+<div id="results"></div>
+<button id="go" disabled>Add my recommendation</button>
+<p id="msg" class="small muted"></p>
+</div>
+
+<h2>All recommendations</h2>
+<div id="all"></div>
+</main>
+
+<script>
+const IMG="https://image.tmdb.org/t/p/w185";
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let voter,recos=[],likes=[],found=[],picked=null,timer;
+try{
+  voter=localStorage.getItem("voter");
+  if(!voter){voter=crypto.randomUUID();localStorage.setItem("voter",voter)}
+  $("name").value=localStorage.getItem("name")||"";
+}catch(e){}
+voter=voter||String(Math.random()).slice(2)+String(Math.random()).slice(2);
+
+const post=b=>fetch("/api/data",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)})
+  .then(r=>{if(!r.ok)throw new Error(r.status)});
+
+function groups(){
+  const m=new Map();
+  for(const r of recos){
+    let g=m.get(r.tmdb_id);
+    if(!g){g={...r,by:[],likes:0,mine:false};m.set(r.tmdb_id,g)}
+    if(!g.by.includes(r.student))g.by.push(r.student);
+  }
+  for(const l of likes){
+    const g=m.get(l.tmdb_id);
+    if(g){g.likes++;if(l.voter===voter)g.mine=true}
+  }
+  return [...m.values()];
+}
+
+function card(g){
+  return `<div class="film">${g.poster?`<img src="${IMG}${esc(g.poster)}" alt="">`:'<div class="ph"></div>'}
+<div class="info"><b>${esc(g.title)}</b> <span class="muted">${esc(g.year)}</span>
+<div class="muted small">Recommended by ${g.by.map(n=>esc(n)).join(", ")}</div>
+<p class="ov">${esc(g.overview)}</p></div>
+<div class="stub"><button class="like${g.mine?" on":""}" data-id="${esc(g.tmdb_id)}" aria-label="Like ${esc(g.title)}">♥ ${g.likes}</button></div></div>`;
+}
+
+function render(){
+  const g=groups();
+  const top=g.filter(x=>x.likes>0).sort((a,b)=>b.likes-a.likes).slice(0,5);
+  $("top").innerHTML=top.length?top.map(card).join(""):'<p class="muted">No likes yet. Like a film below to start the ranking.</p>';
+  $("all").innerHTML=g.length?g.map(card).join(""):'<p class="muted">No recommendations yet. Add the first one above.</p>';
+  $("status").textContent="";
+}
+
+async function load(){
+  try{
+    const r=await fetch("/api/data",{cache:"no-store"});
+    if(!r.ok)throw new Error(r.status);
+    const d=await r.json();
+    recos=d.recos.sort((a,b)=>b.created_at-a.created_at);
+    likes=d.likes;
+    render();
+  }catch(e){$("status").textContent="Could not load the films. Check that the storage is connected in Vercel."}
+}
+
+async function toggle(id){
+  const mine=likes.some(l=>l.tmdb_id===id&&l.voter===voter);
+  try{
+    await post({action:"like",tmdb_id:id,voter,on:!mine});
+    likes=mine?likes.filter(l=>!(l.tmdb_id===id&&l.voter===voter)):[...likes,{tmdb_id:id,voter}];
+    render();
+  }catch(e){$("status").textContent="Could not save your like. Try again."}
+}
+
+function upd(){$("go").disabled=!(picked&&$("name").value.trim())}
+const msg=t=>{$("msg").textContent=t};
+
+async function search(q){
+  try{
+    const r=await fetch("/api/search?q="+encodeURIComponent(q));
+    if(!r.ok)throw new Error(r.status);
+    found=(await r.json()).results||[];
+    $("results").innerHTML=found.length?found.map((m,i)=>`<div class="res" data-i="${i}">${m.poster_path?`<img src="${IMG}${esc(m.poster_path)}" alt="">`:'<div class="ph"></div>'}<div><b>${esc(m.title)}</b> <span class="muted">${esc((m.release_date||"").slice(0,4))}</span></div></div>`).join(""):'<p class="muted small">No film found. Try another title.</p>';
+  }catch(e){$("results").innerHTML='<p class="muted small">Search failed. Check the TMDB_KEY setting in Vercel.</p>'}
+}
+
+$("q").addEventListener("input",()=>{
+  clearTimeout(timer);picked=null;upd();msg("");
+  const q=$("q").value.trim();
+  if(q.length<2){$("results").innerHTML="";return}
+  timer=setTimeout(()=>search(q),400);
+});
+$("name").addEventListener("input",upd);
+
+$("results").addEventListener("click",e=>{
+  const row=e.target.closest(".res");
+  if(!row)return;
+  picked=found[Number(row.dataset.i)];
+  $("q").value=picked.title;
+  $("results").innerHTML=row.outerHTML;
+  upd();
+});
+
+document.addEventListener("click",e=>{
+  const b=e.target.closest(".like");
+  if(b)toggle(Number(b.dataset.id));
+});
+
+$("go").addEventListener("click",async()=>{
+  const name=$("name").value.trim().slice(0,40);
+  try{localStorage.setItem("name",name)}catch(e){}
+  if(recos.some(r=>r.tmdb_id===picked.id&&r.student.toLowerCase()===name.toLowerCase())){
+    msg("You already recommended this film.");return;
+  }
+  $("go").disabled=true;
+  try{
+    await post({action:"rec",tmdb_id:picked.id,title:picked.title,year:(picked.release_date||"").slice(0,4),
+      poster:picked.poster_path||"",overview:(picked.overview||"").slice(0,600),student:name,voter});
+    picked=null;$("q").value="";$("results").innerHTML="";
+    msg("Film added. Thanks!");
+    await load();
+  }catch(e){msg("Could not add the film. Try again.")}
+  upd();
+});
+
+load();
+</script>
+</body>
+</html>
